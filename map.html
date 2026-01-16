@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>SafeNav Kerala - Final Pro AI</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css" />
+
+    <style>
+        :root { --accent: #007bff; --bg: #000; --text: #fff; }
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); overflow: hidden; }
+        #map { height: 100vh; width: 100vw; z-index: 1; }
+        
+        #nav-panel {
+            position: absolute; top: 15px; left: 20px; z-index: 3000; 
+            background: rgba(20, 20, 20, 0.95); padding: 20px; border-radius: 15px; 
+            border: 2px solid var(--accent); width: 320px; box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+        #nav-panel input {
+            width: 100%; padding: 12px; margin-bottom: 12px; border-radius: 8px; 
+            border: 1px solid #333; background: #000; color: #00ff00; box-sizing: border-box;
+        }
+        #go-btn {
+            width: 100%; background: var(--accent); color: white; font-weight: bold; 
+            padding: 15px; border-radius: 8px; border: none; cursor: pointer;
+        }
+
+        /* Top Action Buttons */
+        #theme-btn {
+            position: absolute; top: 15px; right: 20px; z-index: 3000;
+            padding: 10px; border-radius: 50%; background: #fff; border: 2px solid #000; cursor: pointer; font-size: 20px;
+        }
+        #minimize-btn {
+            position: absolute; top: 15px; right: 80px; z-index: 3000;
+            padding: 10px; border-radius: 12px; background: var(--accent); color: white; 
+            border: 1px solid white; cursor: pointer; font-size: 18px; display: none;
+        }
+        
+        #status-panel { 
+            position: absolute; bottom: 25px; left: 50%; transform: translateX(-50%);
+            z-index: 1000; background: rgba(0,0,0,0.9); color: #00ff00; 
+            padding: 12px 35px; border-radius: 50px; border: 2px solid var(--accent);
+            font-weight: bold; text-align: center; min-width: 320px;
+        }
+
+        /* Instructions Panel */
+        .leaflet-routing-container { 
+            background: rgba(255, 255, 255, 0.95) !important; color: #333 !important;
+            max-height: 200px !important; width: 300px !important; overflow-y: auto;
+            border-radius: 10px; margin-top: 230px !important; font-size: 13px;
+            transition: transform 0.3s ease-in-out, opacity 0.3s;
+        }
+
+        /* Minimize logic */
+        .itinerary-hidden {
+            transform: translateX(-150%);
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .camera-icon { filter: drop-shadow(0 0 8px red); }
+    </style>
+</head>
+<body>
+
+<button id="theme-btn" onclick="toggleTheme()">🌓</button>
+<button id="minimize-btn" onclick="toggleItinerary()">📋</button>
+
+<div id="nav-panel">
+    <h3 style="margin:0 0 15px 0; color:#00ccff; text-align:center;">SafeNav Kerala</h3>
+    <input list="kerala-locs" id="start-node" placeholder="Start Point (Empty for GPS)">
+    <input list="kerala-locs" id="end-node" placeholder="Destination (e.g. Munnar)">
+    <datalist id="kerala-locs">
+        <option value="Kochi"><option value="Trivandrum"><option value="Munnar">
+        <option value="Wayanad"><option value="Thrissur"><option value="Kozhikode">
+        <option value="Alappuzha"><option value="Palakkad"><option value="Kannur">
+    </datalist>
+    <button id="go-btn" onclick="startNavigation()">START SMART NAVIGATION</button>
+</div>
+
+<div id="map"></div>
+<div id="status-panel">🛰️ INITIALIZING SENSORS...</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
+
+<script>
+    const MY_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImYzMzZmZGU5YzI2MDRhZWI4MmJjMjlhZTIwODlhOWZjIiwiaCI6Im11cm11cjY0In0=";
+    
+    let isDark = true;
+    const map = L.map('map', { zoomControl: false }).setView([10.5, 76.5], 8);
+    let tileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
+
+    function toggleTheme() {
+        isDark = !isDark;
+        map.removeLayer(tileLayer);
+        tileLayer = L.tileLayer(isDark ? 
+            'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png' : 
+            'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    }
+
+    // Toggle Visibility of the side navigation window
+    function toggleItinerary() {
+        const container = document.querySelector('.leaflet-routing-container');
+        if (container) {
+            container.classList.toggle('itinerary-hidden');
+        }
+    }
+
+    const neonCamIcon = L.icon({
+        iconUrl: 'https://cdn-icons-png.flaticon.com/512/684/684908.png', 
+        iconSize: [40, 40], iconAnchor: [20, 40], className: 'camera-icon'
+    });
+
+    const userMarker = L.circleMarker([0,0], { radius: 10, color: '#00ccff', weight: 4, fillOpacity: 0.8 }).addTo(map);
+    let routeLayer = null, itineraryControl = null;
+    let aiCams = [], liveLat = 0, liveLng = 0;
+
+    async function initCameras() {
+        try {
+            const res = await fetch('cameras.json');
+            aiCams = await res.json();
+            aiCams.forEach(cam => {
+                L.marker([cam.lat, cam.lng], { icon: neonCamIcon }).addTo(map);
+                L.circle([cam.lat, cam.lng], { radius: 250, color: 'red', weight: 1, fillOpacity: 0.1 }).addTo(map);
+            });
+            document.getElementById('status-panel').innerText = "✅ SENSORS SYNCED";
+        } catch (e) { document.getElementById('status-panel').innerText = "⚠️ READY"; }
+    }
+
+    navigator.geolocation.watchPosition(pos => {
+        liveLat = pos.coords.latitude; liveLng = pos.coords.longitude;
+        userMarker.setLatLng([liveLat, liveLng]);
+        monitorSafety(liveLat, liveLng);
+        if(!routeLayer) map.panTo([liveLat, liveLng]); 
+    }, null, { enableHighAccuracy: true });
+
+    async function startNavigation() {
+        const startInput = document.getElementById('start-node').value;
+        const destInput = document.getElementById('end-node').value;
+        if (!destInput) return alert("Select destination!");
+        
+        document.getElementById('status-panel').innerText = "🔍 LOCATING...";
+        
+        const resEnd = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${destInput}, Kerala, India`).then(r => r.json());
+        if (resEnd.length === 0) return alert("Destination not found!");
+        const destCoords = { lat: resEnd[0].lat, lng: resEnd[0].lon };
+
+        let startCoords = { lat: liveLat, lng: liveLng };
+        if (startInput) {
+            const resStart = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${startInput}, Kerala, India`).then(r => r.json());
+            if (resStart.length > 0) startCoords = { lat: resStart[0].lat, lng: resStart[0].lon };
+        }
+
+        drawRoute(startCoords, destCoords);
+    }
+
+    async function drawRoute(start, end) {
+        if (routeLayer) map.removeLayer(routeLayer);
+        if (itineraryControl) map.removeControl(itineraryControl);
+        
+        const response = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': MY_KEY },
+            body: JSON.stringify({ "coordinates": [[parseFloat(start.lng), parseFloat(start.lat)], [parseFloat(end.lng), parseFloat(end.lat)]] })
+        });
+
+        const data = await response.json();
+
+        if (data.features && data.features.length > 0) {
+            const rawCoords = data.features[0].geometry.coordinates;
+            const leafletCoords = rawCoords.map(c => [c[1], c[0]]);
+
+            routeLayer = L.polyline(leafletCoords, { color: '#00ccff', weight: 10, opacity: 1, lineJoin: 'round' }).addTo(map);
+            map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
+
+            itineraryControl = L.Routing.control({
+                waypoints: [L.latLng(start.lat, start.lng), L.latLng(end.lat, end.lng)],
+                lineOptions: { styles: [{ color: 'transparent' }] },
+                addWaypoints: false,
+                draggableWaypoints: false,
+                show: true
+            }).addTo(map);
+
+            // Show minimize button
+            document.getElementById('minimize-btn').style.display = 'block';
+
+            const summary = data.features[0].properties.summary;
+            const dist = (summary.distance / 1000).toFixed(1);
+            const timeMinutes = Math.round(summary.duration / 60);
+            const hours = Math.floor(timeMinutes / 60);
+            const mins = timeMinutes % 60;
+            let timeString = hours > 0 ? `${hours}h ${mins}m` : `${mins} mins`;
+
+            document.getElementById('status-panel').innerHTML = `🏁 ${dist} KM | ⏱️ ${timeString}`;
+            
+            window.speechSynthesis.cancel();
+            window.speechSynthesis.speak(new SpeechSynthesisUtterance(`Path found. Total distance is ${dist} kilometers. Estimated time is ${timeString}.`));
+        }
+    }
+
+    function monitorSafety(lat, lng) {
+        aiCams.forEach(cam => {
+            const d = map.distance([lat, lng], [cam.lat, cam.lng]);
+            if (d < 450 && !cam.alerted) {
+                window.speechSynthesis.cancel();
+                window.speechSynthesis.speak(new SpeechSynthesisUtterance(`Warning. AI Camera ahead at ${cam.name}`));
+                cam.alerted = true;
+                document.getElementById('status-panel').innerHTML = `<span style="color:red">🚨 AI CAMERA: ${cam.name}</span>`;
+            } else if (d > 600) { cam.alerted = false; }
+        });
+    }
+
+    initCameras();
+</script>
+</body>
+</html>
